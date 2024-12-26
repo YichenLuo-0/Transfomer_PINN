@@ -100,6 +100,15 @@ def main():
         def closure():
             # Forward pass
             coord_batch = torch.cat([x_batch, y_batch], dim=-1)
+
+            # Input dimension:
+            # coords_gird: [batch_size, gird_seq_len, 2]
+            # bc_gird: [batch_size, gird_seq_len, 1 + bc_dims]
+            # coords_query: [batch_size, query_seq_len, 2]
+            # t_query: [batch_size, query_seq_len, 1]
+            #
+            # 其中，gird_seq_len为网格点的数量，query_seq_len为查询点的数量
+            # 训练神经网络时，网格点必须覆盖整个区域，而查询点可以是任意位置，任意数量
             pred = pinn(coord_batch, bc_batch, coord_batch, t_batch)
 
             # Calculate the loss
