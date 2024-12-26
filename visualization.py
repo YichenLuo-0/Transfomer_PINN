@@ -54,8 +54,8 @@ def generate_fig(x, y, sigma_x, sigma_y, tau_xy, title):
 
 def main():
     # Mesh size of the elastic body
-    nx = 100
-    ny = 100
+    nx = 40
+    ny = 40
 
     index = 10
 
@@ -74,12 +74,13 @@ def main():
     # Convert the data to tensors
     x = torch.tensor(x, dtype=torch.float32).view(-1, 1).unsqueeze(0).requires_grad_(True)
     y = torch.tensor(y, dtype=torch.float32).view(-1, 1).unsqueeze(0).requires_grad_(True)
+    coord = torch.cat([x, y], dim=-1)
     bc = torch.tensor(bc, dtype=torch.float32).unsqueeze(0)
 
     # Use the trained model to predict the stress distribution
     # pinn = PinnsFormer(d_model=64, d_hidden=64, n=4, heads=2, e=e, nu=nu)
     pinn = torch.load("cases/triangle/pinn.pth").cpu()
-    pred = pinn(x, y, bc)
+    pred = pinn(coord, bc, coord)
 
     u = pred[:, :, 0:1]
     v = pred[:, :, 1:2]

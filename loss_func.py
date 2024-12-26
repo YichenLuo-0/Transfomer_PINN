@@ -30,8 +30,8 @@ class PinnLoss(_Loss):
         # Calculate the loss
         data_loss = self.data_loss(u, v, sigma_x, sigma_y, tau_xy, u_gt, v_gt, sigma_x_gt, sigma_y_gt, tau_xy_gt)
         # data_loss = torch.tensor(0.0)
-        # pde_loss = self.pde_loss(x, y, sigma_x, sigma_y, tau_xy)
-        pde_loss = torch.tensor(0.0)
+        pde_loss = self.pde_loss(x, y, sigma_x, sigma_y, tau_xy)
+        # pde_loss = torch.tensor(0.0)
         return data_loss, pde_loss
 
     def data_loss(self, u, v, sigma_x, sigma_y, tau_xy, u_gt, v_gt, sigma_x_gt, sigma_y_gt, tau_xy_gt):

@@ -3,8 +3,8 @@ from torch import nn
 
 from model.activation_func import WaveAct
 from model.embedding import GBE
-from model.patching import Patching
-from model.serialization import serialization, sort_tensor, desort_tensor
+from model.patching import PatchEmbedding
+from model.serialization import serialization, sort_tensor
 
 
 class MLP(nn.Module):
@@ -29,20 +29,73 @@ class MLP(nn.Module):
         return self.sequential(x)
 
 
+class EncoderLayer(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super(EncoderLayer, self).__init__()
+
+        # Multi-head self-attention layer
+        self.attn = nn.MultiheadAttention(embed_dim=d_model, num_heads=num_heads, batch_first=True)
+
+        # Feed-forward network
+        self.ff = MLP(d_model, d_model)
+
+        # Layer normalization
+        self.layer_norm_1 = nn.LayerNorm(d_model)
+        self.layer_norm_2 = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        residual = x
+        x = self.attn(x, x, x)[0]
+        x = residual + x
+        x = self.layer_norm_1(x)
+
+        residual = x
+        x = self.ff(x)
+        x = residual + x
+        x = self.layer_norm_2(x)
+        return x
+
+
+class Encoder(nn.Module):
+    def __init__(self, d_model, num_layers, num_heads):
+        super(Encoder, self).__init__()
+        self.num_layers = num_layers
+
+        # Stack multiple encoder layers
+        self.layers = nn.ModuleList(
+            [EncoderLayer(d_model, num_heads) for _ in range(num_layers)]
+        )
+
+    def forward(self, x):
+        for i in range(self.num_layers):
+            # Pass through each encoder layer
+            x = self.layers[i](x)
+        return x
+
+
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, num_heads):
         super(DecoderLayer, self).__init__()
 
-        self.layer_norm_1 = nn.LayerNorm(d_model)
-        self.layer_norm_2 = nn.LayerNorm(d_model)
+        # Multi-head cross-attention layer
         self.attn = nn.MultiheadAttention(embed_dim=d_model, num_heads=num_heads, batch_first=True)
+
+        # Feed-forward network
         self.ff = MLP(d_model, d_model)
 
-    def forward(self, x_in, x):
-        x = x + self.attn(x, x, x)[0]
+        # Layer normalization
+        self.layer_norm_1 = nn.LayerNorm(d_model)
+        self.layer_norm_2 = nn.LayerNorm(d_model)
+
+    def forward(self, encoder_out, x):
+        residual = x
+        x = self.attn(x, encoder_out, encoder_out)[0]
+        x = residual + x
         x = self.layer_norm_1(x)
 
-        x = x + self.ff(x)
+        residual = x
+        x = self.ff(x)
+        x = residual + x
         x = self.layer_norm_2(x)
         return x
 
@@ -52,60 +105,79 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.num_layers = num_layers
 
+        # Stack multiple decoder layers
         self.layers = nn.ModuleList(
             [DecoderLayer(d_model, num_heads) for _ in range(num_layers)]
         )
 
-    def forward(self, x):
-        x_in = x
-
+    def forward(self, encoder_out, x):
         for i in range(self.num_layers):
-            # Pass through the encoder layer
-            x = self.layers[i](x_in, x)
+            # Pass through the decoder layer
+            x = self.layers[i](encoder_out, x)
         return x
 
 
-class PinnsFormer(nn.Module):
+class URT(nn.Module):
     def __init__(
             self,
-            bc_dims,
+            d_input,
+            d_bc,
             d_output,
             d_emb,
-            num_expand,
-            patch_seq_len,
+            d_model,
+            patch_size,
             depth,
-            num_layers,
+            num_layers_encoder,
+            num_layers_decoder,
             num_heads
     ):
-        super(PinnsFormer, self).__init__()
+        super(URT, self).__init__()
         self.depth = depth
-        self.d_model = d_emb * num_expand
 
         # Gated Boundary Embedding layer
-        self.gbe = GBE(bc_dims, 2, d_emb, d_emb)
-        self.positional_encoding = MLP(2, d_emb, d_emb, 4)
-        self.patching = Patching(sum(bc_dims) + 1, d_emb, patch_seq_len, depth, num_expand, d_output)
+        self.embedding = GBE(d_bc, d_hidden=d_emb, d_out=d_emb)
+        self.positional_encoding = MLP(d_input, d_emb, d_emb)
+        self.patching = PatchEmbedding(patch_size)
 
-        # Encoder only Transformer model
-        self.encoder = Decoder(self.d_model, num_layers, num_heads)
+        # Encoder and decoder Transformer layers
+        self.encoder = Encoder(d_model, num_layers_encoder, num_heads)
+        self.decoder = Decoder(d_model, num_layers_decoder, num_heads)
 
-    def forward(self, x, y, bc):
-        coords = torch.cat([x, y], dim=-1)
-        emb = self.gbe(coords, bc)
+        # Define the layers
+        self.mlp_gird = nn.Linear(d_emb * patch_size, d_model)
+        self.mlp_query = MLP(d_input + 1, d_model, d_model)
+        self.mlp_out = nn.Sequential(
+            *[
+                MLP(d_model, d_model, d_model),
+                nn.LayerNorm(d_model),
+                nn.Linear(d_model, d_output)
+            ]
+        )
+
+    def forward(self, coords_gird, bc_gird, coords_query, t_query):
+        batch_size, seq_len, _ = coords_gird.size()
+
+        # Embedding and positional encoding, and encode the boundary conditions
+        emb = self.embedding(bc_gird)
+        pe = self.positional_encoding(coords_gird)
+        gird = emb + pe
 
         # Sort the input tensor based on the code
-        indices, code = serialization(coords, bc, depth=self.depth)
-        coords = sort_tensor(coords, indices)
-        emb = sort_tensor(emb, indices)
-        code = sort_tensor(code, indices)
+        indices, _ = serialization(coords_gird, depth=self.depth)
+        gird = sort_tensor(gird, indices)
 
         # Patching the input
-        out = self.patching.patch(emb, coords, code)
+        self.patching.set_seq_len(seq_len)
+        query_patched = self.patching(gird)
 
         # Pass through the encoder layers
-        out = self.encoder(out)
+        encoder_in = self.mlp_gird(query_patched)
+        encoder_out = self.encoder(encoder_in)
 
-        # Desort the output tensor based on the indices
-        out = self.patching.linear_out(coords, bc, out)
-        out = desort_tensor(out, indices)
+        # Pass through the decoder layers
+        coords_t = torch.cat([coords_query, t_query], dim=-1)
+        decoder_in = self.mlp_query(coords_t)
+        decoder_out = self.decoder(encoder_out, decoder_in)
+
+        out = self.mlp_out(decoder_out)
         return out

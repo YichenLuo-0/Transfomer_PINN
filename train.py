@@ -1,13 +1,10 @@
-import sys
-
 import numpy as np
 import torch
-from torch import nn
 from torch.optim import LBFGS
 
 from cases.triangle.triangle import Triangle
 from loss_func import PinnLoss
-from model.neural_network import PinnsFormer
+from model.neural_network import URT
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -31,12 +28,12 @@ def random_choice(dataset_num, batch_size):
 
 def main():
     # Mesh size of the elastic body
-    nx = 50
-    ny = 50
+    nx = 60
+    ny = 60
 
     # Training parameters
     epochs = 600
-    batch_size = 10
+    batch_size = 20
 
     # Initialize the elastic body
     elastic_body = Triangle(e, nu, l, fea_path="cases/triangle/file.rst")
@@ -68,14 +65,16 @@ def main():
     y_copy = y.repeat(dataset_num, 1, 1)
 
     # Initialize the network and optimizer
-    pinn = PinnsFormer(
-        bc_dims=bc_dims,
+    pinn = URT(
+        d_input=2,
+        d_bc=[bc_dims],
         d_output=5,
         d_emb=32,
-        num_expand=16,
-        patch_seq_len=256,
+        d_model=256,
+        patch_size=8,
         depth=16,
-        num_layers=4,
+        num_layers_encoder=2,
+        num_layers_decoder=2,
         num_heads=2
     ).to(device)
 
@@ -100,7 +99,8 @@ def main():
 
         def closure():
             # Forward pass
-            pred = pinn(x_batch, y_batch, bc_batch)
+            coord_batch = torch.cat([x_batch, y_batch], dim=-1)
+            pred = pinn(coord_batch, bc_batch, coord_batch, t_batch)
 
             # Calculate the loss
             data_loss, pde_loss = loss_func(x_batch, y_batch, bc_batch, pred, gt_batch)

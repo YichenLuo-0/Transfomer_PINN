@@ -22,14 +22,14 @@ class GBE(nn.Module):
 
         # Learnable embedding layer
         self.learnable_emb = nn.Sequential(*[
-            nn.Linear(sum(bc_dims) * num_expand + 3, d_hidden),
+            nn.Linear(sum(bc_dims) * num_expand + 1, d_hidden),
             WaveAct(),
             nn.Linear(d_hidden, d_hidden),
             WaveAct(),
             nn.Linear(d_hidden, d_out),
         ])
 
-    def forward(self, coords, bc):
+    def forward(self, bc):
         # Encode boundary conditions, expand dimensions
         bc_encode = []
         for i, liner in enumerate(self.liners):
@@ -43,5 +43,5 @@ class GBE(nn.Module):
 
         # Concatenate all the input features
         bc_encode = torch.cat(bc_encode, dim=-1)
-        encode = torch.cat([coords, bc[:, :, 0:1], bc_encode], dim=-1)
+        encode = torch.cat([bc[:, :, 0:1], bc_encode], dim=-1)
         return self.learnable_emb(encode)

@@ -29,9 +29,9 @@ def normalize(x, depth=16):
     return normalized.to(torch.int64)
 
 
-def serialization(coords, bc, depth=16):
+def serialization(coords, depth=16):
     x, y = coords[..., 0:1], coords[..., 1:2]
-    batch_size, _, d_bc = bc.shape
+    batch_size, _, _ = coords.shape
 
     # Convert x, y coordinates to integers
     xx = normalize(x, depth=depth)
