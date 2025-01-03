@@ -67,7 +67,7 @@ def main():
     # Initialize the network and optimizer
     pinn = URT(
         d_input=2,
-        d_bc=[bc_dims],
+        d_bc=bc_dims,
         d_output=5,
         d_emb=32,
         d_model=256,

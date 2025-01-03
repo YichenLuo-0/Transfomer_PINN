@@ -44,15 +44,11 @@ class EncoderLayer(nn.Module):
         self.layer_norm_2 = nn.LayerNorm(d_model)
 
     def forward(self, x):
-        residual = x
-        x = self.attn(x, x, x)[0]
-        x = residual + x
-        x = self.layer_norm_1(x)
+        x2 = self.layer_norm_1(x)
+        x = x + self.attn(x2, x2, x2)[0]
 
-        residual = x
-        x = self.ff(x)
-        x = residual + x
-        x = self.layer_norm_2(x)
+        x2 = self.layer_norm_2(x)
+        x = x + self.ff(x2)
         return x
 
 
@@ -87,16 +83,12 @@ class DecoderLayer(nn.Module):
         self.layer_norm_1 = nn.LayerNorm(d_model)
         self.layer_norm_2 = nn.LayerNorm(d_model)
 
-    def forward(self, encoder_out, x):
-        residual = x
-        x = self.attn(x, encoder_out, encoder_out)[0]
-        x = residual + x
-        x = self.layer_norm_1(x)
+    def forward(self, x, encoder_out):
+        x2 = self.layer_norm_1(x)
+        x = x + self.attn(x2, encoder_out, encoder_out)[0]
 
-        residual = x
-        x = self.ff(x)
-        x = residual + x
-        x = self.layer_norm_2(x)
+        x2 = self.layer_norm_2(x)
+        x = x + self.ff(x2)
         return x
 
 
@@ -110,10 +102,10 @@ class Decoder(nn.Module):
             [DecoderLayer(d_model, num_heads) for _ in range(num_layers)]
         )
 
-    def forward(self, encoder_out, x):
+    def forward(self, x, encoder_out):
         for i in range(self.num_layers):
             # Pass through the decoder layer
-            x = self.layers[i](encoder_out, x)
+            x = self.layers[i](x, encoder_out)
         return x
 
 
